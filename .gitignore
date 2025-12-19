@@ -1,0 +1,19 @@
+# Java
+backend/target/
+backend/.mvn/
+backend/*.jar
+backend/.idea/
+backend/*.iml
+
+# Node / Vue
+frontend/node_modules/
+frontend/dist/
+frontend/.DS_Store
+
+# IDE
+.idea/
+*.swp
+*.log
+
+# Database keys or local settings
+backend/src/main/resources/application-local.yml
