@@ -1,42 +1,55 @@
 server:
   port: 9090
 
-# 数据库配置
 spring:
+  # 1. 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    username: root   #你本地的数据库用户名
-    password: root #你本地的数据库密码
-    url: jdbc:mysql://localhost:3306/bank_system?useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&useSSL=false&serverTimezone=GMT%2b8&allowPublicKeyRetrieval=true
+    # 确保这里的数据库名 bank_system 与你在 MySQL 中创建的名字一致
+    url: jdbc:mysql://localhost:3306/bank_system?useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+
+  # 2. 文件上传限制
   servlet:
     multipart:
       max-file-size: 100MB
       max-request-size: 100MB
+
+  # 3. 路径匹配策略
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
-  rabbitmq:
-    port: 5672
-    host: localhost
+
+  # 4. Redis 配置
   data:
     redis:
       database: 1
       host: localhost
       port: 6379
 
-# 配置mybatis实体和xml映射
-mybatis:
-  mapper-locations: classpath:mapper/*.xml
-  type-aliases-package: com.example.entity
+  # 5. RabbitMQ (任务书虽未强制要求，但你配置中已有，予以保留)
+  rabbitmq:
+    port: 5672
+    host: localhost
+
+# 6. 修改为 mybatis-plus (非常重要！)
+mybatis-plus:
+  # 对应你真实的包路径
+  type-aliases-package: seig.retail_bank_analysis_system.entity
+  mapper-locations: classpath:/mapper/*.xml
   configuration:
+    # 在控制台打印 SQL 语句，方便调试
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 开启下划线转驼峰 (annual_income -> annualIncome)
     map-underscore-to-camel-case: true
 
-# 分页
+# 7. 分页插件配置
 pagehelper:
   helper-dialect: mysql
   reasonable: true
   support-methods-arguments: true
   params: count=countSql
 
+# 自定义属性
 ip: localhost
