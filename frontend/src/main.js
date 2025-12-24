@@ -11,6 +11,12 @@ const app = createApp(App)
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
     app.component(key, component)
 }
+router.beforeEach((to, from, next) => {
+    if (to.name) {
+        document.title = to.name + ' - 零售银行数据分析系统';
+    }
+    next();
+});
 
 app.use(router)
 app.use(ElementPlus)

@@ -2,12 +2,16 @@ package seig.retail_bank_analysis_system.controller;
 
 import com.alibaba.excel.EasyExcel;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import seig.retail_bank_analysis_system.dao.BankCustomerMapper;
 import seig.retail_bank_analysis_system.dao.BankTransactionMapper;
+import seig.retail_bank_analysis_system.dao.RiskRecordMapper;
 import seig.retail_bank_analysis_system.dto.CustomerQueryDTO;
 import seig.retail_bank_analysis_system.entity.BankCustomer;
 import seig.retail_bank_analysis_system.entity.BankTransaction;
@@ -17,7 +21,6 @@ import seig.retail_bank_analysis_system.util.Result;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,9 +36,15 @@ public class DataManagementController {
     private BankTransactionMapper transactionMapper;
 
     @Autowired
+    private RiskRecordMapper riskRecordMapper;
+
+    @Autowired
     private StringRedisTemplate redisTemplate;
 
-    // ================= 1. 客户基础数据模块 (用于分群分析页) =================
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    // ================= 1. 客户基础数据模块 =================
 
     /**
      * 获取所有客户列表
@@ -48,26 +57,26 @@ public class DataManagementController {
     /**
      * 导入客户基础数据 Excel
      */
+    @Log("导入客户基础数据")
     @PostMapping("/import")
     public Result<?> importCustomers(@RequestParam("file") MultipartFile file) throws IOException {
         EasyExcel.read(file.getInputStream(), BankCustomer.class, new CustomerDataListener(customerMapper)).sheet().doRead();
-
+        // 数据变动，清除缓存
         redisTemplate.delete("dashboard_data_cache");
-
         return Result.success("客户数据导入成功");
     }
 
 
-    // ================= 2. 交易流水数据模块 (用于交易分析页) =================
+    // ================= 2. 交易流水数据模块 =================
 
     /**
-     * 获取交易流水列表 (展示最近的500条)
+     * 获取交易流水列表
      */
     @GetMapping("/transaction-list")
     public Result<?> getTransactionList() {
         return Result.success(transactionMapper.selectList(new LambdaQueryWrapper<BankTransaction>()
                 .orderByDesc(BankTransaction::getTransTime)
-                .last("LIMIT 100"))); // 仅展示最新100条防止页面卡顿
+                .last("LIMIT 100")));
     }
 
     /**
@@ -81,25 +90,20 @@ public class DataManagementController {
             trans.setId(null);
             transactionMapper.insert(trans);
         }
-
-        // 【新增】导入成功后，立即删除首页缓存
+        // 数据变动，清除缓存
         redisTemplate.delete("dashboard_data_cache");
-
         return Result.success("成功导入 " + list.size() + " 条流水数据");
     }
 
-    // ================= 3. 高级交叉分析模块 (用于多维统计页) =================
+    // ================= 3. 高级交叉分析模块 =================
 
     @PostMapping("/search")
     public Result<?> searchCustomers(@RequestBody CustomerQueryDTO query) {
-        // 执行多表关联的交叉分析查询（SQL在BankCustomerMapper中定义）
         List<Map<String, Object>> result = customerMapper.crossAnalyze(query);
 
-        // 计算当前筛选结果的综合指标汇总
         Map<String, Object> summary = new HashMap<>();
         summary.put("totalPeople", result.size());
 
-        // 计算这批人的平均交易额
         double avgTrans = result.stream()
                 .mapToDouble(m -> {
                     Object amount = m.get("total_trans_amount");
@@ -118,15 +122,50 @@ public class DataManagementController {
         return Result.success(response);
     }
 
+    // ================= 4. 系统数据重置模块 =================
+
+    /**
+     * 一键清空所有业务数据并重置自增ID
+     */
+    @Log("清空系统所有业务数据")
     @PostMapping("/clear-all")
+    @Transactional(rollbackFor = Exception.class)
     public Result<?> clearAllData() {
-        // 1. 清空数据库表
-        customerMapper.delete(null);
-        transactionMapper.delete(null);
+        try {
+            // 1. 清空三个核心业务表的数据
+            customerMapper.delete(null);
+            transactionMapper.delete(null);
+            riskRecordMapper.delete(null);
 
-        // 2. 【核心】立即清空 Redis 缓存
-        redisTemplate.delete("dashboard_data_cache");
+            // 2. 重置 MySQL 自增 ID 计数器为 1
+            jdbcTemplate.execute("ALTER TABLE bank_customer AUTO_INCREMENT = 1");
+            jdbcTemplate.execute("ALTER TABLE bank_transaction AUTO_INCREMENT = 1");
+            jdbcTemplate.execute("ALTER TABLE bank_risk_record AUTO_INCREMENT = 1");
 
-        return Result.success("数据库及缓存已全部清空");
+            // 3. 强制失效 Redis 缓存
+            redisTemplate.delete("dashboard_data_cache");
+
+            return Result.success("系统业务数据已重置，ID 计数器已归零");
+        } catch (Exception e) {
+            return Result.error("重置失败：" + e.getMessage());
+        }
+    }
+
+    @Log("导出客户分群数据")
+    @GetMapping("/export")
+    public void exportCustomers(HttpServletResponse response) throws IOException {
+        // 1. 设置响应头
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        String fileName = "Bank_Customer_Analysis_Result";
+        response.setHeader("Content-Disposition", "attachment;filename=" + fileName + ".xlsx");
+
+        // 2. 获取数据
+        List<BankCustomer> list = customerMapper.selectList(null);
+
+        // 3. 执行导出
+        EasyExcel.write(response.getOutputStream(), BankCustomer.class)
+                .sheet("分群结果")
+                .doWrite(list);
     }
 }

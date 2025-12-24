@@ -23,4 +23,10 @@ public interface BankTransactionMapper extends BaseMapper<BankTransaction> {
             "ORDER BY month ASC " +
             "LIMIT 6")
     List<Map<String, Object>> getMonthlyTrend();
+
+    @Select("SELECT type as name, SUM(amount) as value " +
+            "FROM bank_transaction " +
+            "GROUP BY type " +
+            "ORDER BY value DESC")
+    List<Map<String, Object>> getProductSalesStats();
 }

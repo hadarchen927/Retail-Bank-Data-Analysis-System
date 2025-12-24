@@ -11,29 +11,27 @@ import java.math.BigDecimal;
 @Data
 @TableName("bank_customer")
 public class BankCustomer {
-
     @TableId(type = IdType.AUTO)
-    @ExcelProperty("id") // 修改这里：允许 EasyExcel 读写 ID
+    @ExcelProperty("id") // 只有导出时有用
     private Long id;
 
-    @ExcelProperty("custName")
+    @ExcelProperty("custName") // 必须对应 Python 里的 custName
     private String custName;
 
-    @ExcelProperty("gender")
+    @ExcelProperty("gender") // 必须对应 Python 里的 gender
     private String gender;
 
     @ExcelProperty("age")
     private Integer age;
 
     @ExcelProperty("annualIncome")
-    private BigDecimal annualIncome;
+    private java.math.BigDecimal annualIncome;
 
     @ExcelProperty("totalAssets")
-    private BigDecimal totalAssets;
+    private java.math.BigDecimal totalAssets;
 
     @ExcelProperty("loanBalance")
-    private BigDecimal loanBalance;
+    private java.math.BigDecimal loanBalance;
 
-    @ExcelProperty("clusterTag") // 修改这里：确保能读到 Python 生成的标签
     private Integer clusterTag;
 }

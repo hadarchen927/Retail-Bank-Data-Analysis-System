@@ -14,6 +14,7 @@ const routes = [
             { path: 'risk', name: '风险预警监控', component: () => import('@/views/risk/index.vue') },
             { path: 'user', name: '系统账户管理', component: () => import('@/views/user/index.vue') },
             { path: 'data', name: '数据集成中心', component: () => import('@/views/data/index.vue') },
+            { path: 'log', name: '系统审计日志', component: () => import('@/views/log/index.vue') },
         ]
     }
 ]

@@ -21,10 +21,31 @@ public class CustomerDataListener implements ReadListener<BankCustomer> {
 
     @Override
     public void invoke(BankCustomer data, AnalysisContext context) {
+        // 【数据清洗逻辑】
+        // 1. 年龄清洗：如果年龄小于 18 或大于 100，设定为默认值 35（或标记为异常）
+        if (data.getAge() == null || data.getAge() < 18 || data.getAge() > 100) {
+            data.setAge(35);
+        }
+
+        // 2. 收入清洗：银行数据不允许年收入为负数
+        if (data.getAnnualIncome() != null && data.getAnnualIncome().compareTo(java.math.BigDecimal.ZERO) < 0) {
+            data.setAnnualIncome(java.math.BigDecimal.ZERO);
+        }
+
+        // 3. 字段保护：如果性别为空，默认设为“男”
+        if (data.getGender() == null || data.getGender().isEmpty()) {
+            data.setGender("男");
+        }
+
+        // 4. 资产清洗：确保总资产不为 null
+        if (data.getTotalAssets() == null) {
+            data.setTotalAssets(java.math.BigDecimal.ZERO);
+        }
+
         cachedDataList.add(data);
-        // 达到阈值就存储
         if (cachedDataList.size() >= 100) {
             saveData();
+            cachedDataList.clear();
         }
     }
 
