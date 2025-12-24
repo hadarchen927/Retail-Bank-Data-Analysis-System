@@ -20,12 +20,12 @@
           <span>业务控制台</span>
         </el-menu-item>
 
-        <el-menu-item index="/data" v-if="userRole === 'ADMIN' || userRole === 'ANALYST'">
+        <el-menu-item index="/data" v-if="userRole === 'ADMIN' || userRole === 'ANALYST' || userRole === 'RISK_OFFICER'">
           <el-icon><DataAnalysis /></el-icon>
           <span>数据集成中心</span>
         </el-menu-item>
 
-        <el-menu-item index="/analysis" v-if="userRole === 'ADMIN' || userRole === 'ANALYST'">
+        <el-menu-item index="/analysis" v-if="userRole === 'ADMIN' || userRole === 'ANALYST' || userRole === 'MANAGER'" >
           <el-icon><PieChart /></el-icon>
           <span>客户分群分析</span>
         </el-menu-item>

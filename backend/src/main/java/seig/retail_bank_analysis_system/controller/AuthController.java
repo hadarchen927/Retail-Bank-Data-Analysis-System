@@ -35,6 +35,9 @@ public class AuthController {
             return Result.error("用户名或密码错误");
         }
 
+        user.setLoginCount(user.getLoginCount() + 1);
+        userMapper.updateById(user);
+
         Map<String, Object> data = new HashMap<>();
         // 【修改点】Token 格式改为：用户名_时间戳
         String token = JwtUtils.createToken(user.getUsername()); // 使用 JWT 工具

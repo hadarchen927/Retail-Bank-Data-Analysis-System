@@ -1,24 +1,42 @@
 <template>
-  <!-- 唯一的根容器 -->
   <div class="analysis-page-wrapper">
-    <div class="analysis-container" v-loading="loading" element-loading-text="AI 算法建模计算中...">
+    <div class="analysis-container" v-loading="loading" :element-loading-text="loadingText">
       <el-card>
         <template #header>
           <div class="card-header">
             <span class="title">
               <el-icon><MagicStick /></el-icon> AI 客户价值聚类分析
             </span>
+
             <div class="op-group">
-              <span class="label">聚类数量(K):</span>
-              <!-- 输入框绑定 clusterK -->
+              <!-- K值选择器：所有人可见，因为经理需要切换看效果 -->
+              <span class="label">聚类规模(K):</span>
               <el-input-number v-model="clusterK" :min="2" :max="5" size="small" style="margin-right: 15px" />
-              <el-button type="primary" icon="VideoPlay" @click="handleRunAnalysis">执行模型训练</el-button>
-              <el-button @click="handleReset" plain icon="RefreshLeft">重置结果</el-button>
+
+              <!-- 场景 A：分析师/管理员按钮 -->
+              <template v-if="userRole !== 'MANAGER'">
+                <el-button type="primary" icon="VideoPlay" @click="handleRunAnalysis">执行模型训练</el-button>
+                <el-button @click="handleReset" plain icon="RefreshLeft">重置结果</el-button>
+              </template>
+
+              <!-- 场景 B：经理按钮 -->
+              <template v-else>
+                <el-button type="success" icon="DataAnalysis" @click="handleRunAnalysis">生成决策建议视图</el-button>
+                <el-tag type="info" effect="plain" style="margin-left: 10px">决策探索模式</el-tag>
+              </template>
             </div>
           </div>
         </template>
 
-        <!-- 模型指标卡片 -->
+        <!-- 提示语根据角色动态变化 -->
+        <el-alert
+            :title="userRole === 'MANAGER' ? '经理您好，您可以调整 K 值并点击按钮，系统将实时计算该规模下的客户分布与营销建议。' : '模型管理：调整 K 值以训练最佳的客户分群模型。'"
+            :type="userRole === 'MANAGER' ? 'info' : 'success'"
+            show-icon
+            style="margin-bottom: 20px"
+        />
+
+        <!-- 模型指标卡片 (所有人可见) -->
         <el-row :gutter="20" style="margin-bottom: 20px;">
           <el-col :span="8">
             <el-card shadow="never" class="score-card sse">
@@ -29,18 +47,18 @@
           <el-col :span="8">
             <el-card shadow="never" class="score-card silhouette">
               <el-statistic title="轮廓系数 (Silhouette)" :value="silScore" :precision="3" />
-              <div class="score-tip">↑ 越接近1表示分类越科学</div>
+              <div class="score-tip">↑ 越接近 1 表示分类越科学</div>
             </el-card>
           </el-col>
           <el-col :span="8">
             <el-card shadow="never" class="score-card kvalue">
-              <el-statistic title="当前分群规模" :value="currentModelK" />
+              <el-statistic title="当前视图规模" :value="currentModelK" />
               <div class="score-tip">个业务目标群体</div>
             </el-card>
           </el-col>
         </el-row>
 
-        <!-- 图表与统计表并排 -->
+        <!-- 图表与解读并排 -->
         <el-row :gutter="20">
           <el-col :span="15">
             <div id="scatterChart" style="width: 100%; height: 520px; border: 1px solid #f0f2f5; border-radius: 8px;"></div>
@@ -62,8 +80,8 @@
               </el-table-column>
             </el-table>
             <div class="biz-advice">
-              <p><b>💡 决策参考：</b></p>
-              <p>模型已根据“资产存量”与“收入流量”双因子自动标记客户。请根据业务定义对不同颜色的点簇制定差异化营销方案。</p>
+              <p><b>💡 经理决策参考：</b></p>
+              <p>当前分群模型下，建议对 <b>{{ getTopGroup() }}</b> 投入 60% 的营销预算，其转化潜力最高。</p>
             </div>
           </el-col>
         </el-row>
@@ -81,116 +99,107 @@ import { setPageInfo } from '@/utils/setInfo'
 
 // --- 状态变量 ---
 const loading = ref(false)
-const clusterK = ref(3)       // 输入框控制的 K
-const currentModelK = ref(0)  // 模型实际运行的 K
+const userRole = ref(localStorage.getItem('role') || 'GUEST')
+const clusterK = ref(3)
+const currentModelK = ref(0)
 const modelScore = ref(0)
 const silScore = ref(0)
 const clusterSummary = ref([])
 let myChart = null
 
-// --- 工具函数 ---
+const loadingText = computed(() => {
+  return userRole.value === 'MANAGER' ? '正在为您生成决策分析视图...' : 'AI 算法正在进行模型训练...'
+})
+
+// 判定哪个群体最值得关注（取平均收入最高的）
+const getTopGroup = () => {
+  if (clusterSummary.value.length === 0) return "目标群体"
+  const top = [...clusterSummary.value].sort((a,b) => b.avgIncome - a.avgIncome)[0]
+  return top.label
+}
+
 const handleResize = () => myChart && myChart.resize()
 
 const getTagType = (label) => {
   if (label.includes('顶级')) return 'danger'
   if (label.includes('中坚')) return 'success'
-  if (label.includes('潜力')) return 'warning'
   return 'info'
 }
 
-// --- 数据获取核心逻辑 ---
 const fetchData = async () => {
   try {
-    // 1. 同步上一次运行的评分和 K 值 (确保刷新后状态一致)
     const scoreRes = await axios.get('/api/analysis/score')
     if (scoreRes.data) {
       modelScore.value = scoreRes.data.sse || 0
       silScore.value = scoreRes.data.sil || 0
       currentModelK.value = scoreRes.data.k || 0
-      clusterK.value = scoreRes.data.k || 3 // 将输入框也同步为实际模型的值
+      // 初始化进入时，同步选择器
+      if (currentModelK.value > 0) clusterK.value = currentModelK.value
     }
-
-    // 2. 获取散点图原始数据
     const res = await axios.get('/api/analysis/chart-data')
-    // 注意：我们将绘图逻辑放在这里，并传入后端真实数据
     renderScatterChart(res.data)
-
-    // 3. 获取表格解读数据
     const summaryRes = await axios.get('/api/analysis/summary')
     clusterSummary.value = summaryRes.data || []
   } catch (error) {
-    console.error('数据加载失败', error)
+    console.error(error)
   }
 }
 
-// --- 执行训练 ---
 const handleRunAnalysis = async () => {
   loading.value = true
   try {
     const res = await axios.post(`/api/analysis/run?k=${clusterK.value}`)
-    ElMessage.success("AI 聚类模型训练成功！")
-    await fetchData() // 重新获取所有数据并绘图
+    ElMessage({
+      message: userRole.value === 'MANAGER' ? '决策视图更新成功！' : '模型训练完成！',
+      type: 'success'
+    })
+    await fetchData()
   } finally {
     loading.value = false
   }
 }
 
-// --- 重置 ---
 const handleReset = () => {
-  ElMessageBox.confirm('重置将清空所有分群标签，确定继续？', '提示', { type: 'warning' }).then(async () => {
+  ElMessageBox.confirm('确定重置所有模型结果吗？', '系统提示').then(async () => {
     await axios.post('/api/analysis/reset')
-    ElMessage.info('分群结果已重置')
     fetchData()
   }).catch(() => {})
 }
 
-// --- 绘图逻辑：数据驱动 ---
 const renderScatterChart = (data) => {
   const chartDom = document.getElementById('scatterChart')
-  if (!chartDom) return
+  if (!chartDom || !echarts) return
   if (!myChart) myChart = echarts.init(chartDom)
 
-  // 【核心修复】根据数据中实际存在的 clusterTag 来计算分群，而不是根据本地 clusterK 过滤
   const maxTag = Math.max(...data.map(item => item.clusterTag), -1)
   const numGroups = maxTag + 1
-
   const seriesData = Array.from({ length: Math.max(numGroups, 0) }, () => [])
   const colors = ['#F56C6C', '#409EFF', '#67C23A', '#E6A23C', '#9b59b6']
-  const groupNames = ['高价值组', '潜力组', '一般组', '关注组', '其他组']
 
   data.forEach(item => {
     if (item.clusterTag !== -1 && item.clusterTag !== null) {
-      seriesData[item.clusterTag].push([
-        item.annualIncome,
-        item.totalAssets,
-        item.custName
-      ])
+      seriesData[item.clusterTag].push([item.annualIncome, item.totalAssets, item.custName])
     }
   })
 
   const series = seriesData.map((group, index) => ({
-    name: groupNames[index] || `群体 ${index}`,
+    name: `群体 ${index}`,
     type: 'scatter',
     data: group,
     symbolSize: 12,
-    itemStyle: { color: colors[index] || '#999' },
-    emphasis: { focus: 'series' }
+    itemStyle: { color: colors[index] || '#999' }
   }))
 
   myChart.setOption({
-    title: { text: '全行客户资产聚类分布空间', left: 'center', top: 10 },
-    grid: { top: '15%', bottom: '12%', left: '10%', right: '5%' },
-    tooltip: {
-      formatter: (p) => `<b>${p.seriesName}</b><br/>姓名: ${p.value[2]}<br/>年收入: ￥${p.value[0].toLocaleString()}<br/>总资产: ￥${p.value[1].toLocaleString()}`
-    },
-    xAxis: { name: '年收入', scale: true, splitLine: { lineStyle: { type: 'dashed' } } },
-    yAxis: { name: '总资产', scale: true, splitLine: { lineStyle: { type: 'dashed' } } },
+    title: { text: '客户画像分布空间', left: 'center' },
+    tooltip: { formatter: (p) => `姓名: ${p.value[2]}<br/>年收入: ￥${p.value[0].toLocaleString()}` },
+    xAxis: { name: '年收入', scale: true },
+    yAxis: { name: '总资产', scale: true },
     legend: { bottom: 0 },
     series: series
-  }, true) // true 表示不合并旧数据，防止切换K值时点簇颜色混乱
+  }, true)
 }
 
-// --- 生命周期 ---
 onMounted(() => {
   setPageInfo("客户分群分析")
   fetchData()
@@ -199,10 +208,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
-  if (myChart) {
-    myChart.dispose()
-    myChart = null
-  }
+  if (myChart) myChart.dispose()
 })
 </script>
 
@@ -211,9 +217,9 @@ onUnmounted(() => {
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .title { font-weight: bold; font-size: 18px; display: flex; align-items: center; gap: 8px; }
 .op-group { display: flex; align-items: center; }
-.op-group .label { font-size: 13px; color: #606266; margin-right: 8px; }
+.label { font-size: 13px; color: #606266; margin-right: 8px; }
 .score-card { text-align: center; border-top: 4px solid #409EFF; }
 .score-tip { font-size: 11px; color: #999; margin-top: 5px; }
-.summary-title { font-weight: bold; margin-bottom: 12px; color: #303133; font-size: 15px; }
+.summary-title { font-weight: bold; margin-bottom: 12px; font-size: 15px; }
 .biz-advice { margin-top: 15px; font-size: 12px; color: #7f8c8d; line-height: 1.6; background: #fffdf6; padding: 10px; border: 1px dashed #e6a23c; border-radius: 4px; }
 </style>

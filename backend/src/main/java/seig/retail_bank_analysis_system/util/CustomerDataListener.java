@@ -2,9 +2,11 @@ package seig.retail_bank_analysis_system.util;
 
 import com.alibaba.excel.context.AnalysisContext;
 import com.alibaba.excel.read.listener.ReadListener;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import seig.retail_bank_analysis_system.dao.BankCustomerMapper;
 import seig.retail_bank_analysis_system.entity.BankCustomer;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -12,8 +14,10 @@ import java.util.List;
 public class CustomerDataListener implements ReadListener<BankCustomer> {
 
     private final BankCustomerMapper customerMapper;
-    // 每隔 100 条存储一次数据库，然后清理列表，防止内存溢出
     private List<BankCustomer> cachedDataList = new ArrayList<>(100);
+
+    @Getter private int successCount = 0; // 成功录入数
+    @Getter private int skipCount = 0;    // 剔除异常数
 
     public CustomerDataListener(BankCustomerMapper customerMapper) {
         this.customerMapper = customerMapper;
@@ -21,48 +25,47 @@ public class CustomerDataListener implements ReadListener<BankCustomer> {
 
     @Override
     public void invoke(BankCustomer data, AnalysisContext context) {
-        // 【数据清洗逻辑】
-        // 1. 年龄清洗：如果年龄小于 18 或大于 100，设定为默认值 35（或标记为异常）
+        // 【核心数据清洗逻辑：不符合规则即剔除】
+
+        // 1. 校验姓名是否缺失
+        if (data.getCustName() == null || data.getCustName().trim().isEmpty()) {
+            skipCount++;
+            return; // 直接返回，不加入 list，实现剔除
+        }
+
+        // 2. 校验年龄是否合法
         if (data.getAge() == null || data.getAge() < 18 || data.getAge() > 100) {
-            data.setAge(35);
+            skipCount++;
+            return; // 剔除未成年或超龄异常数据
         }
 
-        // 2. 收入清洗：银行数据不允许年收入为负数
-        if (data.getAnnualIncome() != null && data.getAnnualIncome().compareTo(java.math.BigDecimal.ZERO) < 0) {
-            data.setAnnualIncome(java.math.BigDecimal.ZERO);
+        // 3. 校验金额是否为正数
+        if (data.getAnnualIncome() == null || data.getAnnualIncome().compareTo(BigDecimal.ZERO) < 0 ||
+                data.getTotalAssets() == null || data.getTotalAssets().compareTo(BigDecimal.ZERO) < 0) {
+            skipCount++;
+            return; // 剔除负债或收入数据异常行
         }
 
-        // 3. 字段保护：如果性别为空，默认设为“男”
-        if (data.getGender() == null || data.getGender().isEmpty()) {
-            data.setGender("男");
-        }
-
-        // 4. 资产清洗：确保总资产不为 null
-        if (data.getTotalAssets() == null) {
-            data.setTotalAssets(java.math.BigDecimal.ZERO);
-        }
-
+        // 符合规则，进入缓存队列
+        successCount++;
         cachedDataList.add(data);
         if (cachedDataList.size() >= 100) {
             saveData();
-            cachedDataList.clear();
         }
     }
 
     @Override
     public void doAfterAllAnalysed(AnalysisContext context) {
-        // 最后再存储一次剩余的数据
         saveData();
     }
 
     private void saveData() {
         if (!cachedDataList.isEmpty()) {
-            log.info("正在存储 {} 条数据...", cachedDataList.size());
             for (BankCustomer customer : cachedDataList) {
-                customer.setId(null); // 确保主键自增，防止冲突
+                customer.setId(null);
+                customer.setClusterTag(-1);
                 customerMapper.insert(customer);
             }
-            // !!! 重点：存储完后必须立即清空，否则 doAfterAllAnalysed 会再存一遍
             cachedDataList.clear();
         }
     }

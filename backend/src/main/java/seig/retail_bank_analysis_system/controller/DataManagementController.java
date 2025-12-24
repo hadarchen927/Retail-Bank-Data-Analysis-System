@@ -1,6 +1,7 @@
 package seig.retail_bank_analysis_system.controller;
 
 import com.alibaba.excel.EasyExcel;
+import com.alibaba.excel.support.ExcelTypeEnum;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +22,8 @@ import seig.retail_bank_analysis_system.util.Result;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +47,7 @@ public class DataManagementController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    // ================= 1. 客户基础数据模块 =================
+    // ================= 1. 客户基础数据模块 (CSV) =================
 
     /**
      * 获取所有客户列表
@@ -55,19 +58,30 @@ public class DataManagementController {
     }
 
     /**
-     * 导入客户基础数据 Excel
+     * 导入客户基础数据 CSV
      */
-    @Log("导入客户基础数据")
+    @Log("导入客户基础数据(CSV)")
     @PostMapping("/import")
     public Result<?> importCustomers(@RequestParam("file") MultipartFile file) throws IOException {
-        EasyExcel.read(file.getInputStream(), BankCustomer.class, new CustomerDataListener(customerMapper)).sheet().doRead();
+        CustomerDataListener listener = new CustomerDataListener(customerMapper);
+
+        // 【关键修改】指定 excelType 为 CSV
+        EasyExcel.read(file.getInputStream(), BankCustomer.class, listener)
+                .excelType(ExcelTypeEnum.CSV)
+                .charset(StandardCharsets.UTF_8)
+                .sheet()
+                .doRead();
+
         // 数据变动，清除缓存
         redisTemplate.delete("dashboard_data_cache");
-        return Result.success("客户数据导入成功");
+
+        String msg = String.format("CSV客户数据导入成功！入库：%d 条，剔除脏数据：%d 条",
+                listener.getSuccessCount(), listener.getSkipCount());
+        return Result.success(msg);
     }
 
 
-    // ================= 2. 交易流水数据模块 =================
+    // ================= 2. 交易流水数据模块 (CSV) =================
 
     /**
      * 获取交易流水列表
@@ -80,19 +94,35 @@ public class DataManagementController {
     }
 
     /**
-     * 导入交易流水数据 Excel
+     * 导入交易流水数据 CSV
      */
-    @Log("导入银行流水数据")
+    @Log("导入交易流水(CSV)并执行清洗")
     @PostMapping("/import-transactions")
     public Result<?> importTransactions(@RequestParam("file") MultipartFile file) throws IOException {
-        List<BankTransaction> list = EasyExcel.read(file.getInputStream()).head(BankTransaction.class).sheet().doReadSync();
+        // 【关键修改】指定 excelType 为 CSV
+        List<BankTransaction> list = EasyExcel.read(file.getInputStream())
+                .excelType(ExcelTypeEnum.CSV)
+                .charset(StandardCharsets.UTF_8)
+                .head(BankTransaction.class)
+                .sheet()
+                .doReadSync();
+
+        int cleanCount = 0;
         for (BankTransaction trans : list) {
+            // 流水清洗规则
+            if (trans.getAmount() != null && trans.getAmount().compareTo(BigDecimal.ZERO) < 0) {
+                trans.setAmount(trans.getAmount().abs());
+                cleanCount++;
+            }
+            if (trans.getTransTime() == null) {
+                trans.setTransTime(java.time.LocalDateTime.now());
+            }
             trans.setId(null);
             transactionMapper.insert(trans);
         }
-        // 数据变动，清除缓存
+
         redisTemplate.delete("dashboard_data_cache");
-        return Result.success("成功导入 " + list.size() + " 条流水数据");
+        return Result.success("成功导入 " + list.size() + " 条记录，清洗修正 " + cleanCount + " 项");
     }
 
     // ================= 3. 高级交叉分析模块 =================
@@ -122,50 +152,55 @@ public class DataManagementController {
         return Result.success(response);
     }
 
-    // ================= 4. 系统数据重置模块 =================
+    // ================= 4. 系统管理与导出 (CSV) =================
 
     /**
-     * 一键清空所有业务数据并重置自增ID
+     * 一键重置数据
      */
     @Log("清空系统所有业务数据")
     @PostMapping("/clear-all")
     @Transactional(rollbackFor = Exception.class)
     public Result<?> clearAllData() {
         try {
-            // 1. 清空三个核心业务表的数据
             customerMapper.delete(null);
             transactionMapper.delete(null);
             riskRecordMapper.delete(null);
 
-            // 2. 重置 MySQL 自增 ID 计数器为 1
             jdbcTemplate.execute("ALTER TABLE bank_customer AUTO_INCREMENT = 1");
             jdbcTemplate.execute("ALTER TABLE bank_transaction AUTO_INCREMENT = 1");
             jdbcTemplate.execute("ALTER TABLE bank_risk_record AUTO_INCREMENT = 1");
 
-            // 3. 强制失效 Redis 缓存
             redisTemplate.delete("dashboard_data_cache");
-
-            return Result.success("系统业务数据已重置，ID 计数器已归零");
+            return Result.success("系统数据已重置，ID已归零");
         } catch (Exception e) {
             return Result.error("重置失败：" + e.getMessage());
         }
     }
 
-    @Log("导出客户分群数据")
+    /**
+     * 导出分析结果为 CSV (解决乱码问题)
+     */
+    @Log("导出分析结果(CSV)")
     @GetMapping("/export")
     public void exportCustomers(HttpServletResponse response) throws IOException {
-        // 1. 设置响应头
-        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        // 1. 设置 Content-Type 为 text/csv
+        response.setContentType("text/csv");
         response.setCharacterEncoding("utf-8");
-        String fileName = "Bank_Customer_Analysis_Result";
-        response.setHeader("Content-Disposition", "attachment;filename=" + fileName + ".xlsx");
 
-        // 2. 获取数据
+        // 2. 防止中文文件名乱码
+        String fileName = URLEncoder.encode("银行客户分析结果报表", StandardCharsets.UTF_8).replaceAll("\\+", "%20");
+        response.setHeader("Content-Disposition", "attachment;filename=" + fileName + ".csv");
+
+        // 3. 获取数据
         List<BankCustomer> list = customerMapper.selectList(null);
 
-        // 3. 执行导出
+        // 4. 【核心修复】指定 excelType 为 CSV
+        // EasyExcel 在导出 CSV 时会自动写入 BOM (Byte Order Mark)，
+        // 从而确保 Windows Excel 打开时能正确识别 UTF-8 编码，不再显示问号。
         EasyExcel.write(response.getOutputStream(), BankCustomer.class)
-                .sheet("分群结果")
+                .excelType(ExcelTypeEnum.CSV)
+                .charset(StandardCharsets.UTF_8)
+                .sheet("结果")
                 .doWrite(list);
     }
 }

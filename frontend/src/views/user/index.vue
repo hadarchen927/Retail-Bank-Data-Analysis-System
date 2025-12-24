@@ -25,6 +25,7 @@
             <el-button size="small" type="danger" @click="handleDelete(scope.row.id)">删除</el-button>
           </template>
         </el-table-column>
+        <el-table-column prop="loginCount" label="登录频次" width="100" align="center" />
       </el-table>
     </el-card>
 

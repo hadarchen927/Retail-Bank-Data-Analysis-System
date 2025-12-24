@@ -41,8 +41,20 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const logList = ref([])
 
 const fetchLogs = async () => {
-  const res = await axios.get('/api/user/logs')
-  logList.value = res.data
+  try {
+    const res = await axios.get('/api/user/logs')
+    logList.value = res.data
+
+    // 【新增】弹出刷新成功提示
+    ElMessage({
+      message: '审计日志已同步至最新状态',
+      type: 'success',
+      duration: 2000 // 提示显示 2 秒
+    })
+  } catch (error) {
+    console.error('刷新日志失败', error)
+    ElMessage.error('获取日志数据失败，请检查网络')
+  }
 }
 
 onMounted(() => {

@@ -33,5 +33,11 @@ public class BankCustomer {
     @ExcelProperty("loanBalance")
     private java.math.BigDecimal loanBalance;
 
+    @ExcelProperty("creditScore")
+    private Integer creditScore;
+
+    @ExcelProperty("overdueDays")
+    private Integer overdueDays;
+
     private Integer clusterTag;
 }

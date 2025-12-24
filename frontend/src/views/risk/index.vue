@@ -4,9 +4,22 @@
       <template #header>
         <div class="card-header">
           <span><el-icon><Warning /></el-icon> 零售银行业务风险监控台</span>
-          <el-button type="danger" icon="Radar" @click="handleScan">启动 AI 风险扫描</el-button>
+          <div class="op-group">
+            <!-- 新增：风控专用导入按钮 -->
+            <el-upload
+                action="http://localhost:9090/api/data/import-transactions"
+                :on-success="handleImportSuccess"
+                :show-file-list="false"
+                style="display: inline-block; margin-right: 10px;"
+            >
+              <el-button type="warning" icon="Upload" plain>导入待检流水</el-button>
+            </el-upload>
+
+            <el-button type="danger" icon="Radar" @click="handleScan">启动 AI 风险扫描</el-button>
+          </div>
         </div>
       </template>
+
 
       <!-- 快捷统计卡片 -->
       <el-row :gutter="20" style="margin-bottom: 20px">
@@ -64,6 +77,10 @@ const loading = ref(false)
 // 计算属性
 const highRiskCount = computed(() => riskList.value.filter(i => i.riskLevel === '高' && i.status === '待处理').length)
 const processedCount = computed(() => riskList.value.filter(i => i.status !== '待处理').length)
+
+const handleImportSuccess = () => {
+  ElMessage.success('待检流水上传成功！请点击启动扫描进行风险判定。')
+}
 
 const fetchList = async () => {
   try {

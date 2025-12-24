@@ -69,6 +69,18 @@ public class RiskController {
                     saveRisk(c, "异常大额支出", "中", "监测到近期存在单笔超过5000元的支出流水。");
                     count++;
                 }
+
+                // 规则 C：逾期风险判定
+                if (c.getOverdueDays() != null && c.getOverdueDays() > 0) {
+                    saveRisk(c, "信贷逾期风险", "高", "该客户当前存在 " + c.getOverdueDays() + " 天的逾期记录，需立即催收。");
+                    count++;
+                }
+
+                // 规则 D：信用分过低预警
+                if (c.getCreditScore() != null && c.getCreditScore() < 500) {
+                    saveRisk(c, "信用评分极低", "中", "客户信用评分仅为 " + c.getCreditScore() + "，建议限制其新增授信。");
+                    count++;
+                }
             }
 
             return Result.success("风险扫描完成！系统已自动标记 " + count + " 条潜在风险点。");
