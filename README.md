@@ -60,4 +60,3 @@
 2. 修改 `application.yml` 数据库配置及 `AnalysisController.java` 中的 Python 解释器路径。
 3. 后端启动：运行 `RetailBankAnalysisSystemApplication` (内置 DataInitializer 自动创建 admin/123456)。
 4. 前端启动：`cd frontend && npm install && npm run serve`。
->>>>>>> 127840a44d2d878c4abf8e225e424cfe94b88f9a
