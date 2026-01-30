@@ -5,6 +5,9 @@
       <el-button type="success" icon="Download" @click="handleDownloadReport">
         导出标准化分析报告 (PDF)
       </el-button>
+      <el-button type="primary" icon="Document" @click="handleDownloadWord">
+        导出分析报告 (Word)
+      </el-button>
     </div>
 
     <!-- 第一行：核心指标卡片 -->
@@ -216,6 +219,13 @@ onMounted(() => {
     })
   }
 })
+
+const handleDownloadWord = () => {
+  const url = 'http://localhost:9090/api/report/export-word'
+  window.open(url, '_blank')
+  ElMessage.success('Word报告正在生成并下载...')
+}
+
 </script>
 
 <style scoped>

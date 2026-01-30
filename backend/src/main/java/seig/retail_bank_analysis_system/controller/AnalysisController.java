@@ -62,7 +62,7 @@ public class AnalysisController {
 
         String folderPath = "D:/retail-bank-analysis-system/data/";
         String fileName = folderPath + "temp_analysis.csv";
-        String pythonExe = "D:/Anaconda3/python.exe";
+        String pythonExe = "D:/Anaconda/python.exe";
         String scriptPath = "D:/retail-bank-analysis-system/backend/python/cluster_analysis.py";
 
         try {
