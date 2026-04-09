@@ -5,8 +5,10 @@ import com.alibaba.excel.support.ExcelTypeEnum;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import seig.retail_bank_analysis_system.dao.BankCustomerMapper;
+import seig.retail_bank_analysis_system.service.BankCustomerService;
 import seig.retail_bank_analysis_system.entity.BankCustomer;
 import seig.retail_bank_analysis_system.util.JwtUtils;
 import seig.retail_bank_analysis_system.util.Log;
@@ -21,10 +23,6 @@ import java.util.Map;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 
-/**
- * AI 客户分群分析控制器
- * 升级版：支持“肘部法则”模型评估数据的解析与展示
- */
 @RestController
 @RequestMapping("/api/analysis")
 public class AnalysisController {
@@ -32,19 +30,29 @@ public class AnalysisController {
     @Autowired
     private BankCustomerMapper customerMapper;
 
-    // 存储最新的模型评估指标（包含肘部图表数据）
+    // 【新增】注入 Service 层用于批量更新性能优化
+    @Autowired
+    private BankCustomerService customerService;
+
+    // 【新增】通过配置文件注入路径，告别硬编码
+    @Value("${python.env.exe-path:D:/Anaconda/python.exe}")
+    private String pythonExe;
+
+    @Value("${python.env.script-path:D:/retail-bank-analysis-system/backend/python/cluster_analysis.py}")
+    private String scriptPath;
+
+    @Value("${python.env.data-folder:D:/retail-bank-analysis-system/data/}")
+    private String folderPath;
+
     private static Map<String, Object> lastMetrics = new HashMap<>();
 
     static {
         lastMetrics.put("sse", 0.0);
         lastMetrics.put("sil", 0.0);
         lastMetrics.put("k", 3);
-        lastMetrics.put("elbowData", new ArrayList<>()); // 存放 [{k:2, sse:xxx}, ...]
+        lastMetrics.put("elbowData", new ArrayList<>());
     }
 
-    /**
-     * 执行 K-Means 聚类训练 (包含肘部法则数据计算)
-     */
     @Log("执行AI分群模型训练(含肘部评估)")
     @PostMapping("/run")
     public Result<?> runAnalysis(@RequestParam(defaultValue = "3") Integer k, HttpServletRequest request) {
@@ -54,16 +62,13 @@ public class AnalysisController {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.replace("Bearer ", "");
             try {
-                JwtUtils.getUsername(token); // 验证Token有效性
+                JwtUtils.getUsername(token);
             } catch (Exception e) {
                 return Result.error("身份认证失效，请重新登录");
             }
         }
 
-        String folderPath = "D:/retail-bank-analysis-system/data/";
         String fileName = folderPath + "temp_analysis.csv";
-        String pythonExe = "D:/Anaconda/python.exe";
-        String scriptPath = "D:/retail-bank-analysis-system/backend/python/cluster_analysis.py";
 
         try {
             Files.createDirectories(Paths.get(folderPath));
@@ -83,38 +88,40 @@ public class AnalysisController {
             pb.redirectErrorStream(true);
             Process process = pb.start();
 
-            // 3. 读取控制台输出
+            // 3. 【优化】精准读取控制台输出
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), "GBK"));
             String line;
-            StringBuilder output = new StringBuilder();
+            String successLine = null;
+            StringBuilder errorLogs = new StringBuilder(); // 收集其他可能报错信息
+
             while ((line = reader.readLine()) != null) {
-                output.append(line);
                 System.out.println("Python引擎输出: " + line);
+                if (line.startsWith("SUCCESS:")) {
+                    successLine = line; // 命中核心数据行
+                } else if (line.startsWith("ERROR:")) {
+                    errorLogs.append(line).append(" ");
+                }
             }
 
             int exitCode = process.waitFor();
-            String outStr = output.toString();
 
-            // 4. 【核心升级】解析包含 ELBOW 数据的新输出格式
-            // 期待格式: SUCCESS:ELBOW:2_123,3_456...:K:3:SCORE:123.4:SILHOUETTE:0.6
-            if (exitCode == 0 && outStr.contains("SUCCESS")) {
-                String[] parts = outStr.split(":");
+            // 4. 解析包含 ELBOW 数据的新输出格式
+            if (exitCode == 0 && successLine != null) {
+                String[] parts = successLine.split(":");
 
                 if (parts.length >= 9) {
                     try {
-                        // 解析肘部法则折线图数据
-                        String elbowRaw = parts[2]; // "2_123,3_456..."
+                        String elbowRaw = parts[2];
                         List<Map<String, Object>> elbowList = new ArrayList<>();
                         for (String pair : elbowRaw.split(",")) {
                             String[] kv = pair.split("_");
                             Map<String, Object> node = new HashMap<>();
                             node.put("k", kv[0]);
-                            node.put("sse", Double.parseDouble(kv[1]));
+                            double sseVal = Double.parseDouble(kv[1]);
+                            node.put("sse", Math.round(sseVal * 100.0) / 100.0); // 保留两位小数，提升前端美观度
                             elbowList.add(node);
                         }
                         lastMetrics.put("elbowData", elbowList);
-
-                        // 解析当前模型指标
                         lastMetrics.put("k", Integer.parseInt(parts[4]));
                         lastMetrics.put("sse", Double.parseDouble(parts[6]));
                         lastMetrics.put("sil", Double.parseDouble(parts[8]));
@@ -131,17 +138,25 @@ public class AnalysisController {
                         .sheet()
                         .doReadSync();
 
+                // 【优化】MyBatis-Plus 批量更新，性能百倍提升
+                List<BankCustomer> updateList = new ArrayList<>();
                 for (BankCustomer customer : resultList) {
                     if (customer.getId() != null) {
                         BankCustomer updateObj = new BankCustomer();
                         updateObj.setId(customer.getId());
                         updateObj.setClusterTag(customer.getClusterTag());
-                        customerMapper.updateById(updateObj);
+                        updateList.add(updateObj);
                     }
                 }
+
+                if (!updateList.isEmpty()) {
+                    // 调用 IService 的批量更新方法
+                    customerService.updateBatchById(updateList);
+                }
+
                 return Result.success(lastMetrics);
             } else {
-                return Result.error("AI 算法引擎异常: " + outStr);
+                return Result.error("AI 算法引擎异常: " + (errorLogs.length() > 0 ? errorLogs.toString() : "未知错误"));
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -149,9 +164,6 @@ public class AnalysisController {
         }
     }
 
-    /**
-     * 获取特征解读摘要
-     */
     @GetMapping("/summary")
     public Result<?> getClusterSummary() {
         List<Map<String, Object>> summary = customerMapper.selectMaps(new QueryWrapper<BankCustomer>()
@@ -178,7 +190,6 @@ public class AnalysisController {
             } else if (avgAst > 1000000) {
                 label = "存量潜力基础客户";
             } else {
-                // 【修改点】根据 tag 给一个默认名称，防止重名
                 label = "大众普惠客户(组" + map.get("cluster_tag") + ")";
             }
             map.put("label", label);
@@ -186,9 +197,6 @@ public class AnalysisController {
         return Result.success(summary);
     }
 
-    /**
-     * 获取评分及历史指标
-     */
     @GetMapping("/score")
     public Result<?> getScore() {
         return Result.success(lastMetrics);

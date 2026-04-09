@@ -33,7 +33,7 @@ spring:
     port: 5672
     host: localhost
 
-# 6. 修改为 mybatis-plus (非常重要！)
+# 6. 修改为 mybatis-plus
 mybatis-plus:
   # 对应你真实的包路径
   type-aliases-package: seig.retail_bank_analysis_system.entity
@@ -50,6 +50,16 @@ pagehelper:
   reasonable: true
   support-methods-arguments: true
   params: count=countSql
+
+# 8. Python 引擎配置
+python:
+  env:
+    # 你的 Python 可执行文件绝对路径 (如果是 Linux，可以改成 /usr/bin/python3)
+    exe-path: D:/Anaconda/python.exe
+    # cluster_analysis.py 脚本的绝对路径
+    script-path: D:/retail-bank-analysis-system/backend/python/cluster_analysis.py
+    # 临时数据交互文件夹路径 (需确保以 / 结尾)
+    data-folder: D:/retail-bank-analysis-system/data/
 
 # 自定义属性
 ip: localhost

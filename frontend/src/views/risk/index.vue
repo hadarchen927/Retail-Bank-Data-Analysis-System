@@ -1,31 +1,23 @@
 <template>
-  <div class="risk-container" v-loading="loading" element-loading-text="全行大数据风险扫描中...">
+  <div class="risk-container">
     <el-card>
       <template #header>
         <div class="card-header">
           <span><el-icon><Warning /></el-icon> 零售银行业务风险监控台</span>
           <div class="op-group">
-            <!-- 新增：风控专用导入按钮 -->
-            <el-upload
-                action="http://localhost:9090/api/data/import-transactions"
-                :on-success="handleImportSuccess"
-                :show-file-list="false"
-                style="display: inline-block; margin-right: 10px;"
-            >
-              <el-button type="warning" icon="Upload" plain>导入待检流水</el-button>
-            </el-upload>
-
-            <el-button type="danger" icon="Radar" @click="handleScan">启动 AI 风险扫描</el-button>
+            <!-- 启动扫描按钮，加入扫描中的 Loading 状态 -->
+            <el-button type="danger" icon="Radar" @click="handleScan" :loading="scanLoading">
+              {{ scanLoading ? 'AI 风险扫描中...' : '启动 AI 风险扫描' }}
+            </el-button>
           </div>
         </div>
       </template>
-
 
       <!-- 快捷统计卡片 -->
       <el-row :gutter="20" style="margin-bottom: 20px">
         <el-col :span="6">
           <div class="stat-box red">
-            <div class="label">待处理高风险</div>
+            <div class="label">待处理风险</div>
             <div class="number">{{ highRiskCount }}</div>
           </div>
         </el-col>
@@ -37,7 +29,16 @@
         </el-col>
       </el-row>
 
-      <el-table :data="riskList" stripe border style="width: 100%" height="520">
+      <!-- 数据表格，加入表格专属的 v-loading 状态 -->
+      <el-table
+          :data="riskList"
+          stripe
+          border
+          style="width: 100%"
+          height="520"
+          v-loading="tableLoading"
+          element-loading-text="正在加载风险预警数据..."
+      >
         <el-table-column prop="createTime" label="发现时间" width="160" sortable />
         <el-table-column prop="custName" label="客户姓名" width="100" />
         <el-table-column prop="riskType" label="类型" width="130">
@@ -71,34 +72,58 @@ import { setPageInfo } from '@/utils/setInfo'
 import axios from '@/utils/request'
 import { ElMessage } from 'element-plus'
 
+// 数据状态
 const riskList = ref([])
-const loading = ref(false)
+
+// 精细化 Loading 状态管理
+const tableLoading = ref(false)   // 控制表格加载
+const scanLoading = ref(false)    // 控制扫描按钮
+const importLoading = ref(false)  // 控制导入按钮
 
 // 计算属性
-const highRiskCount = computed(() => riskList.value.filter(i => i.riskLevel === '高' && i.status === '待处理').length)
+const highRiskCount = computed(() => riskList.value.filter(i => i.status === '待处理').length)
 const processedCount = computed(() => riskList.value.filter(i => i.status !== '待处理').length)
 
+// --- 文件上传生命周期 ---
+const handleBeforeUpload = () => {
+  importLoading.value = true // 上传开始前，开启按钮 loading
+  return true
+}
+
 const handleImportSuccess = () => {
+  importLoading.value = false // 上传成功，关闭 loading
   ElMessage.success('待检流水上传成功！请点击启动扫描进行风险判定。')
 }
 
+const handleImportError = () => {
+  importLoading.value = false // 上传失败，关闭 loading
+  ElMessage.error('文件导入失败，请检查网络或后端服务。')
+}
+
+// --- 接口调用 ---
 const fetchList = async () => {
+  tableLoading.value = true // 开启表格 loading
   try {
     const res = await axios.get('/api/risk/list')
     riskList.value = res.data
   } catch (error) {
-    console.error(error)
+    console.error('获取风险列表失败:', error)
+    ElMessage.error('获取数据失败')
+  } finally {
+    tableLoading.value = false // 无论成功失败，关闭表格 loading
   }
 }
 
 const handleScan = async () => {
-  loading.value = true
+  scanLoading.value = true // 开启扫描按钮 loading
   try {
     const res = await axios.post('/api/risk/scan')
-    ElMessage.success(res.msg)
-    await fetchList()
+    ElMessage.success(res.msg || '扫描完成')
+    await fetchList() // 扫描完成后自动刷新列表
+  } catch (error) {
+    console.error('风险扫描失败:', error)
   } finally {
-    loading.value = false
+    scanLoading.value = false // 关闭扫描按钮 loading
   }
 }
 
@@ -106,12 +131,13 @@ const handleAction = async (id, action) => {
   try {
     await axios.put(`/api/risk/handle/${id}?action=${action}`)
     ElMessage.info(`预警已标记为：${action}`)
-    fetchList()
+    fetchList() // 状态改变后静默刷新列表
   } catch (error) {
-    console.error(error)
+    console.error('状态更新失败:', error)
   }
 }
 
+// 初始化
 onMounted(() => {
   setPageInfo("风险预警监控")
   fetchList()
