@@ -28,7 +28,7 @@
 2. 修改 `application.yml` 数据库配置及 `AnalysisController.java` 中的 Python 解释器路径。
 3. 后端启动：运行 `RetailBankAnalysisSystemApplication` (内置 DataInitializer 自动创建 admin/123456)。
 4. 前端启动：`cd frontend && npm install && npm run serve`。
-=======
+
 # 基于 Spring Boot 的零售银行数据分析系统 (RBDAS)
 
 本项目是一套专为零售银行数字化转型设计的精细化运营分析平台。系统采用 **Java 17 (业务逻辑)** 与 **Python 3 (机器学习引擎)** 异构协同架构，实现了从数据导入到 AI 决策的全流程闭环。
