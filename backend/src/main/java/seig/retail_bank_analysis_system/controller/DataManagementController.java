@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -99,30 +100,59 @@ public class DataManagementController {
     @Log("导入交易流水(CSV)并执行清洗")
     @PostMapping("/import-transactions")
     public Result<?> importTransactions(@RequestParam("file") MultipartFile file) throws IOException {
-        // 【关键修改】指定 excelType 为 CSV
-        List<BankTransaction> list = EasyExcel.read(file.getInputStream())
-                .excelType(ExcelTypeEnum.CSV)
-                .charset(StandardCharsets.UTF_8)
-                .head(BankTransaction.class)
-                .sheet()
-                .doReadSync();
 
-        int cleanCount = 0;
-        for (BankTransaction trans : list) {
-            // 流水清洗规则
-            if (trans.getAmount() != null && trans.getAmount().compareTo(BigDecimal.ZERO) < 0) {
-                trans.setAmount(trans.getAmount().abs());
-                cleanCount++;
-            }
-            if (trans.getTransTime() == null) {
-                trans.setTransTime(java.time.LocalDateTime.now());
-            }
-            trans.setId(null);
-            transactionMapper.insert(trans);
-        }
+        List<BankTransaction> validList = new ArrayList<>();
+
+        EasyExcel.read(file.getInputStream(), BankTransaction.class, new com.alibaba.excel.read.listener.ReadListener<BankTransaction>() {
+                    @Override
+                    public void invoke(BankTransaction data, com.alibaba.excel.context.AnalysisContext context) {
+                        // 1. 清洗负数金额
+                        if (data.getAmount() != null && data.getAmount().compareTo(BigDecimal.ZERO) < 0) {
+                            data.setAmount(data.getAmount().abs());
+                        }
+
+                        // 2. 赋默认时间与清空旧ID
+                        if (data.getTransTime() == null) {
+                            data.setTransTime(java.time.LocalDateTime.now());
+                        }
+                        data.setId(null);
+
+                        validList.add(data);
+
+                        // 3. 满 1000 条保存一次
+                        if (validList.size() >= 1000) {
+                            saveData();
+                        }
+                    }
+
+                    @Override
+                    public void doAfterAllAnalysed(com.alibaba.excel.context.AnalysisContext context) {
+                        saveData(); // 保存最后剩余的尾部数据
+                    }
+
+                    private void saveData() {
+                        if (validList.isEmpty()) return;
+
+                        // 【核心修复】立即拷贝一份并清空原集合，切断重复利用旧对象的死循环
+                        List<BankTransaction> temp = new ArrayList<>(validList);
+                        validList.clear();
+
+                        for (BankTransaction trans : temp) {
+                            try {
+                                transactionMapper.insert(trans);
+                            } catch (Exception e) {
+                                // 某一条烂了只会跳过这一条，不会引发多米诺骨牌崩溃
+                                System.err.println("跳过一条异常流水记录, 报错原因: " + e.getMessage());
+                            }
+                        }
+                    }
+                }).excelType(ExcelTypeEnum.CSV)
+                .charset(StandardCharsets.UTF_8)
+                .sheet()
+                .doRead();
 
         redisTemplate.delete("dashboard_data_cache");
-        return Result.success("成功导入 " + list.size() + " 条记录，清洗修正 " + cleanCount + " 项");
+        return Result.success("流水数据导入执行完成！");
     }
 
     // ================= 3. 高级交叉分析模块 =================

@@ -23,7 +23,6 @@ public class User {
 
     private Integer loginCount; // 对应 login_count
 
-    // 补上这个字段
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime createTime;
 }
